@@ -3,17 +3,42 @@ import type { BoardItem, MondayContext } from "../types";
 
 const monday = mondaySdk();
 
+export type UploadLifecycleStatus = "En cours" | "Reçu Clic" | "Erreur";
+
 type MondayApiResponse = {
   errors?: Array<{ message?: string }>;
   data?: {
+    items?: Array<{
+      column_values?: Array<{
+        id?: string;
+        text?: string;
+      }>;
+    }>;
     boards?: Array<{
       name?: string;
+      items?: Array<{
+        column_values?: Array<{
+          id?: string;
+          text?: string;
+        }>;
+      }>;
       items_page?: {
         items?: Array<{ id: string; name: string }>;
       };
     }>;
   };
 };
+
+function throwGraphQLError(prefix: string, result: MondayApiResponse, context: Record<string, unknown>): never {
+  const messageText = result.errors?.[0]?.message ?? "Unknown monday GraphQL error";
+  console.error("[upload][monday] GraphQL error", {
+    prefix,
+    message: messageText,
+    errors: result.errors,
+    ...context,
+  });
+  throw new Error(`${prefix}: ${messageText}`);
+}
 
 export async function getMondayContext(): Promise<MondayContext> {
   const result = await monday.get("context");
@@ -88,14 +113,48 @@ export async function getBoardName(boardId: number): Promise<string | null> {
   return result.data?.boards?.[0]?.name ?? null;
 }
 
-export async function updateItemUploadStatusMessage(
+export async function getItemTextColumnValue(boardId: number, itemId: number, textColumnId: string): Promise<string> {
+  if (!textColumnId) {
+    throw new Error("Missing VITE_ADBOX_TEXT_COLUMN_ID");
+  }
+
+  const query = `
+    query GetItemTextColumnValue($itemIds: [ID!], $columnIds: [String!]) {
+      items(ids: $itemIds) {
+        column_values(ids: $columnIds) {
+          id
+          text
+        }
+      }
+    }
+  `;
+
+  const result = (await monday.api(query, {
+    variables: {
+      itemIds: [itemId],
+      columnIds: [textColumnId],
+    },
+  })) as MondayApiResponse;
+
+  if (result.errors?.length) {
+    throwGraphQLError("Failed to load adboxId from text column", result, {
+      boardId,
+      itemId,
+      textColumnId,
+    });
+  }
+
+  return result.data?.items?.[0]?.column_values?.[0]?.text ?? "";
+}
+
+export async function updateItemUploadLifecycleStatus(
   boardId: number,
   itemId: number,
-  statusMessageColumnId: string,
-  message: string,
+  statusColumnId: string,
+  status: UploadLifecycleStatus,
 ): Promise<void> {
-  if (!statusMessageColumnId) {
-    throw new Error("Missing VITE_STATUS_MESSAGE_COLUMN_ID");
+  if (!statusColumnId) {
+    throw new Error("Missing VITE_STATUS_COLUMN_ID");
   }
 
   const mutation = `
@@ -115,19 +174,72 @@ export async function updateItemUploadStatusMessage(
     variables: {
       boardId,
       itemId,
-      columnId: statusMessageColumnId,
-      value: message,
+      columnId: statusColumnId,
+      value: status,
     },
   })) as MondayApiResponse;
 
   if (result.errors?.length) {
-    const messageText = result.errors[0]?.message ?? "Unknown monday GraphQL error";
-    throw new Error(`Status update failed: ${messageText}`);
+    throwGraphQLError("Status update failed", result, {
+      boardId,
+      itemId,
+      statusColumnId,
+      status,
+    });
   }
 
   console.info("[upload][monday] Status message updated", {
     boardId,
     itemId,
-    statusMessageColumnId,
+    statusColumnId,
+    status,
+  });
+}
+
+export async function updateItemUploadDetailsMessage(
+  boardId: number,
+  itemId: number,
+  detailsColumnId: string,
+  message: string,
+): Promise<void> {
+  if (!detailsColumnId) {
+    throw new Error("Missing VITE_UPLOAD_DETAILS_COLUMN_ID");
+  }
+
+  const mutation = `
+    mutation SetUploadDetails($boardId: ID!, $itemId: ID!, $columnId: String!, $value: String!) {
+      change_simple_column_value(
+        board_id: $boardId,
+        item_id: $itemId,
+        column_id: $columnId,
+        value: $value
+      ) {
+        id
+      }
+    }
+  `;
+
+  const result = (await monday.api(mutation, {
+    variables: {
+      boardId,
+      itemId,
+      columnId: detailsColumnId,
+      value: message,
+    },
+  })) as MondayApiResponse;
+
+  if (result.errors?.length) {
+    throwGraphQLError("Details update failed", result, {
+      boardId,
+      itemId,
+      detailsColumnId,
+      message,
+    });
+  }
+
+  console.info("[upload][monday] Details message updated", {
+    boardId,
+    itemId,
+    detailsColumnId,
   });
 }

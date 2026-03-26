@@ -24,6 +24,7 @@ export async function forwardFileAndMetadata(session: UploadSession): Promise<bo
       columnId: session.columnId,
       itemId: session.itemId,
       itemName: session.itemName,
+      adboxId: session.adboxId,
       fileName: session.fileName,
       mimeType: session.mimeType,
       fileSize: session.fileSize,

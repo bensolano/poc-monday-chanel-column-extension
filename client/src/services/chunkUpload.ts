@@ -7,6 +7,7 @@ type ChunkUploadPayload = {
   itemId: number;
   itemName: string;
   boardName: string;
+  adboxId: string;
   serverBaseUrl: string;
 };
 
@@ -38,6 +39,7 @@ export async function uploadFileInChunks({
   itemId,
   itemName,
   boardName,
+  adboxId,
   serverBaseUrl,
 }: ChunkUploadPayload): Promise<void> {
   console.info("[upload] init", {
@@ -63,6 +65,7 @@ export async function uploadFileInChunks({
       itemId,
       itemName,
       boardName,
+      adboxId,
     }),
   });
 

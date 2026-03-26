@@ -6,15 +6,23 @@ import {
   extractColumnId,
   getBoardName,
   getBoardItems,
+  getItemTextColumnValue,
   getMondayContext,
-  updateItemUploadStatusMessage,
+  updateItemUploadDetailsMessage,
+  updateItemUploadLifecycleStatus,
 } from "./services/monday";
 import { uploadFileInChunks } from "./services/chunkUpload";
 
 const SERVER_BASE_URL =
   (import.meta.env.VITE_SERVER_BASE_URL as string | undefined) ?? "/api";
-const STATUS_MESSAGE_COLUMN_ID =
-  (import.meta.env.VITE_STATUS_MESSAGE_COLUMN_ID as string | undefined) ?? "";
+const STATUS_COLUMN_ID =
+  (import.meta.env.VITE_STATUS_COLUMN_ID as string | undefined) ??
+  (import.meta.env.VITE_STATUS_MESSAGE_COLUMN_ID as string | undefined) ??
+  "";
+const ADBOX_TEXT_COLUMN_ID =
+  (import.meta.env.VITE_ADBOX_TEXT_COLUMN_ID as string | undefined) ?? "";
+const UPLOAD_DETAILS_COLUMN_ID =
+  (import.meta.env.VITE_UPLOAD_DETAILS_COLUMN_ID as string | undefined) ?? "";
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
@@ -49,7 +57,10 @@ function App() {
           const nextBoardName = await getBoardName(nextBoardId);
           setBoardName(nextBoardName);
         }
-      } catch {
+      } catch (contextError) {
+        console.error("[upload][monday] Failed to load context", {
+          contextError,
+        });
         setError("Failed to load monday context.");
       } finally {
         setIsItemsLoading(false);
@@ -60,7 +71,15 @@ function App() {
   }, []);
 
   const isSendDisabled = useMemo(
-    () => !file || isUploading || !boardId || !columnId || !selectedItemId,
+    () =>
+      !file ||
+      isUploading ||
+      !boardId ||
+      !columnId ||
+      !selectedItemId ||
+      !STATUS_COLUMN_ID ||
+      !ADBOX_TEXT_COLUMN_ID ||
+      !UPLOAD_DETAILS_COLUMN_ID,
     [file, isUploading, boardId, columnId, selectedItemId]
   );
 
@@ -72,6 +91,21 @@ function App() {
 
     if (!boardName) {
       setError("Missing board name.");
+      return;
+    }
+
+    if (!STATUS_COLUMN_ID) {
+      setError("Missing status column config: set VITE_STATUS_COLUMN_ID.");
+      return;
+    }
+
+    if (!ADBOX_TEXT_COLUMN_ID) {
+      setError("Missing adbox text column config: set VITE_ADBOX_TEXT_COLUMN_ID.");
+      return;
+    }
+
+    if (!UPLOAD_DETAILS_COLUMN_ID) {
+      setError("Missing upload details column config: set VITE_UPLOAD_DETAILS_COLUMN_ID.");
       return;
     }
 
@@ -87,6 +121,26 @@ function App() {
     setIsUploading(true);
 
     try {
+      await updateItemUploadDetailsMessage(
+        boardId,
+        selectedItem.id,
+        UPLOAD_DETAILS_COLUMN_ID,
+        `Upload started for ${file.name}`,
+      );
+
+      await updateItemUploadLifecycleStatus(
+        boardId,
+        selectedItem.id,
+        STATUS_COLUMN_ID,
+        "En cours",
+      );
+
+      const adboxId = await getItemTextColumnValue(
+        boardId,
+        selectedItem.id,
+        ADBOX_TEXT_COLUMN_ID,
+      );
+
       await uploadFileInChunks({
         file,
         boardId,
@@ -94,22 +148,30 @@ function App() {
         itemId: selectedItem.id,
         itemName: selectedItem.name,
         boardName,
+        adboxId,
         serverBaseUrl: SERVER_BASE_URL
       });
 
       try {
-        await updateItemUploadStatusMessage(
+        await updateItemUploadDetailsMessage(
           boardId,
           selectedItem.id,
-          STATUS_MESSAGE_COLUMN_ID,
+          UPLOAD_DETAILS_COLUMN_ID,
           `File ${file.name} uploaded successfully`,
+        );
+
+        await updateItemUploadLifecycleStatus(
+          boardId,
+          selectedItem.id,
+          STATUS_COLUMN_ID,
+          "Reçu Clic",
         );
       } catch (statusError) {
         const statusMessage = statusError instanceof Error ? statusError.message : "Unknown status update error";
         console.error("[upload][monday] success status update failed", {
           boardId,
           itemId: selectedItem.id,
-          statusMessageColumnId: STATUS_MESSAGE_COLUMN_ID,
+          statusColumnId: STATUS_COLUMN_ID,
           statusMessage,
         });
         setStatusNotice(`Upload succeeded, but status column was not updated: ${statusMessage}`);
@@ -118,20 +180,37 @@ function App() {
       setUploadDone(true);
     } catch (uploadError) {
       const message = uploadError instanceof Error ? uploadError.message : "Upload failed";
+      console.error("[upload] Upload flow failed", {
+        boardId,
+        itemId: selectedItem.id,
+        fileName: file.name,
+        statusColumnId: STATUS_COLUMN_ID,
+        adboxTextColumnId: ADBOX_TEXT_COLUMN_ID,
+        uploadDetailsColumnId: UPLOAD_DETAILS_COLUMN_ID,
+        message,
+        uploadError,
+      });
 
       try {
-        await updateItemUploadStatusMessage(
+        await updateItemUploadDetailsMessage(
           boardId,
           selectedItem.id,
-          STATUS_MESSAGE_COLUMN_ID,
+          UPLOAD_DETAILS_COLUMN_ID,
           `Upload failed for ${file.name}: ${String(message).slice(0, 220)}`,
+        );
+
+        await updateItemUploadLifecycleStatus(
+          boardId,
+          selectedItem.id,
+          STATUS_COLUMN_ID,
+          "Erreur",
         );
       } catch (statusError) {
         const statusMessage = statusError instanceof Error ? statusError.message : "Unknown status update error";
         console.error("[upload][monday] failure status update failed", {
           boardId,
           itemId: selectedItem.id,
-          statusMessageColumnId: STATUS_MESSAGE_COLUMN_ID,
+          statusColumnId: STATUS_COLUMN_ID,
           statusMessage,
         });
         setStatusNotice(`Upload failed and status column was not updated: ${statusMessage}`);
@@ -245,9 +324,21 @@ function App() {
         </Text>
       ) : null}
 
-      {!STATUS_MESSAGE_COLUMN_ID ? (
+      {!STATUS_COLUMN_ID ? (
         <Text type="text2" color="secondary">
-          Status column updates are disabled: set VITE_STATUS_MESSAGE_COLUMN_ID.
+          Status column updates are disabled: set VITE_STATUS_COLUMN_ID.
+        </Text>
+      ) : null}
+
+      {!ADBOX_TEXT_COLUMN_ID ? (
+        <Text type="text2" color="secondary">
+          adboxId metadata is disabled: set VITE_ADBOX_TEXT_COLUMN_ID.
+        </Text>
+      ) : null}
+
+      {!UPLOAD_DETAILS_COLUMN_ID ? (
+        <Text type="text2" color="secondary">
+          Upload details messages are disabled: set VITE_UPLOAD_DETAILS_COLUMN_ID.
         </Text>
       ) : null}
     </div>

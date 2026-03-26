@@ -8,6 +8,7 @@ export type UploadSession = {
   columnId: string;
   itemId: number;
   itemName: string;
+  adboxId: string;
   chunkSize: number;
   totalChunks: number;
   uploadPath: string;

@@ -31,7 +31,7 @@ async function appendChunk(targetFilePath: string, chunkPath: string): Promise<v
 export const uploadRouter = Router();
 
 uploadRouter.post("/init", async (req, res) => {
-  const { fileName, fileSize, mimeType, boardId, boardName, columnId, itemId, itemName } = req.body as {
+  const { fileName, fileSize, mimeType, boardId, boardName, columnId, itemId, itemName, adboxId } = req.body as {
     fileName?: string;
     fileSize?: number;
     mimeType?: string;
@@ -40,14 +40,15 @@ uploadRouter.post("/init", async (req, res) => {
     columnId?: string;
     itemId?: number;
     itemName?: string;
+    adboxId?: string;
   };
 
-  if (!fileName || !fileSize || !boardId || !boardName || !columnId || !itemId || !itemName) {
+  if (!fileName || !fileSize || !boardId || !boardName || !columnId || !itemId || !itemName || adboxId === undefined) {
     res.status(400).json({ error: "Missing required init payload fields" });
     return;
   }
 
-  console.info("[upload][init]", { fileName, fileSize, boardId, boardName, columnId, itemId, itemName });
+  console.info("[upload][init]", { fileName, fileSize, boardId, boardName, columnId, itemId, itemName, adboxId });
 
   const maxBytes = config.maxFileSizeMb * 1024 * 1024;
   if (fileSize > maxBytes) {
@@ -73,6 +74,7 @@ uploadRouter.post("/init", async (req, res) => {
     columnId,
     itemId,
     itemName,
+    adboxId,
     chunkSize,
     totalChunks: Math.ceil(fileSize / chunkSize),
     uploadPath,
@@ -147,6 +149,7 @@ uploadRouter.post("/complete", async (req, res) => {
         boardName: session.boardName,
         itemId: session.itemId,
         itemName: session.itemName,
+        adboxId: session.adboxId,
         fileName: session.fileName,
       },
     };

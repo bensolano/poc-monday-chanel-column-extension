@@ -10,9 +10,10 @@ POC for a **Board Column Extension** on monday.com (Files column) with a minimal
 
 The frontend uploads in chunks to a local backend. On completion, the backend:
 
-1. queries monday API (with backend `MONDAY_API_KEY`) for one column metadata object using `boardId` + `columnId`
-2. writes `metadata.json` in the upload directory with selected item + file metadata
-3. optionally forwards metadata + file to `TARGET_UPLOAD_URL` when it is configured
+1. writes `metadata.json` in the upload directory with selected item + file metadata
+2. optionally forwards metadata + file to `TARGET_UPLOAD_URL` when it is configured
+
+All monday GraphQL calls are executed from the client (inside the monday iframe) through `monday.api`.
 
 ## Official docs used
 
@@ -35,7 +36,6 @@ The frontend uploads in chunks to a local backend. On completion, the backend:
 │   └── src/
 │       ├── routes/upload.ts     # /upload/init, /upload/chunk, /upload/complete
 │       └── services/
-│           ├── mondayApi.ts     # monday GraphQL column metadata
 │           └── forwarder.ts     # forwards file + metadata to target endpoint
 └── .env.example
 ```
@@ -78,8 +78,10 @@ cp .env.example .env
 
 Set values in `.env`:
 
-- `MONDAY_API_KEY` = monday API key used server-side for GraphQL metadata lookup
 - `TARGET_UPLOAD_URL` = optional external API endpoint that receives file + metadata
+- `VITE_STATUS_COLUMN_ID` = monday status column id used for lifecycle updates (`En cours`, `Reçu Clic`, `Erreur`)
+- `VITE_ADBOX_TEXT_COLUMN_ID` = monday text column id whose value is sent as `adboxId` in metadata
+- `VITE_UPLOAD_DETAILS_COLUMN_ID` = monday text/long-text column id used for human-readable upload details messages
 - optional tuning:
   - `MAX_FILE_SIZE_MB` (default `4096`)
   - `CHUNK_SIZE_MB` (default `8`)
@@ -104,8 +106,12 @@ By default, the client calls `/api` and Vite proxies it to `http://localhost:400
 
 - UI loads monday context using `monday.get("context")` and extracts `boardId`/`columnId`.
 - User selects file and clicks `Send`.
+- Client sets status column to `En cours`.
+- Client writes a details message (`Upload started for ...`).
+- Client reads adbox id from `VITE_ADBOX_TEXT_COLUMN_ID` on selected item.
 - Client calls `POST /upload/init`, then `POST /upload/chunk` for each chunk, then `POST /upload/complete`.
-- Backend on `/complete` fetches monday column metadata (`id`, `title`, `type`, `settings_str`) and sends file + metadata payload to `TARGET_UPLOAD_URL`.
+- Client sets status column to `Reçu Clic` on success, or `Erreur` on failure.
+- Client writes success/failure details messages in the details text column.
 - Backend on `/complete` also writes `metadata.json` next to the uploaded file.
 
 ## Payload sent to target endpoint
@@ -117,8 +123,11 @@ The backend sends multipart/form-data with:
 - `file`: assembled file stream
 - `metadata` (JSON string):
   - `boardId`
+  - `boardName`
   - `columnId`
-  - `columnMetadata` (`id`, `title`, `type`, `settings_str`)
+  - `itemId`
+  - `itemName`
+  - `adboxId`
   - `fileName`, `mimeType`, `fileSize`
 
 ## UI scope (intentionally minimal)
@@ -133,7 +142,7 @@ Implemented exactly as requested:
 ## Troubleshooting
 
 - If UI shows missing board/column context, confirm app is opened as Board column extension in a board column (not standalone browser tab).
-- If monday metadata fails, verify `MONDAY_API_KEY` and app/user permissions.
+- If status/adbox/details updates fail, verify `VITE_STATUS_COLUMN_ID`, `VITE_ADBOX_TEXT_COLUMN_ID`, `VITE_UPLOAD_DETAILS_COLUMN_ID`, and app/user permissions.
 - If forwarding fails, verify `TARGET_UPLOAD_URL` accepts multipart form-data.
 - For very large files on weak networks, reduce `CHUNK_SIZE_MB` (e.g. `4`) to improve reliability.
 - If you see `Failed to fetch` on `Send`, make sure backend is running and calls are going through `/api` proxy (or set `VITE_SERVER_BASE_URL` to an HTTPS backend URL for external hosting).
